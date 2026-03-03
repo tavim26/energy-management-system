@@ -1,0 +1,322 @@
+version: '3.8'
+
+services:
+ 
+  postgres-user-db:
+    image: postgres:15
+    container_name: postgres-user-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: user_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+    networks:
+      - energy-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-device-db:
+    image: postgres:15
+    container_name: postgres-device-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: device_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - device-db-data:/var/lib/postgresql/data
+    networks:
+      - energy-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-auth-db:
+    image: postgres:15
+    container_name: postgres-auth-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: auth_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+    networks:
+      - energy-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  monitoring-db:
+    image: postgres:15
+    container_name: monitoring-db
+    restart: always
+    environment:
+      POSTGRES_DB: monitoring_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5436:5432"
+    volumes:
+      - monitoring-db-data:/var/lib/postgresql/data
+    networks:
+      - energy-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq-data-broker:
+    image: rabbitmq:3-management
+    container_name: rabbitmq-data-broker
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data-broker:/var/lib/rabbitmq
+    networks:
+      - energy-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq-sync-broker:
+    image: rabbitmq:3-management
+    container_name: rabbitmq-sync-broker
+    restart: always
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-sync-broker:/var/lib/rabbitmq
+    networks:
+      - energy-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build:
+      context: ./backend/user-management
+      dockerfile: ./Dockerfile
+    container_name: user-service
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_IP=postgres-user-db
+      - DB_PORT=5432
+      - DB_DBNAME=user_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - AUTH_SERVICE_URL=http://authorization-service:8083
+      - DEVICE_SERVICE_URL=http://device-service:8082
+      - RABBITMQ_SYNC_HOST=rabbitmq-sync-broker
+      - RABBITMQ_SYNC_PORT=5672
+      - RABBITMQ_SYNC_USERNAME=guest
+      - RABBITMQ_SYNC_PASSWORD=guest
+    depends_on:
+      postgres-user-db:
+        condition: service_healthy
+      rabbitmq-sync-broker:
+        condition: service_healthy
+    networks:
+      - energy-network
+
+  authorization-service:
+    build:
+      context: ./backend/authorization-service
+      dockerfile: ./Dockerfile
+    container_name: authorization-service
+    restart: always
+    ports:
+      - "8083:8083"
+    environment:
+      - DB_IP=postgres-auth-db
+      - DB_PORT=5432
+      - DB_DBNAME=auth_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - USER_SERVICE_URL=http://user-service:8081
+      - RABBITMQ_SYNC_HOST=rabbitmq-sync-broker
+      - RABBITMQ_SYNC_PORT=5672
+      - RABBITMQ_SYNC_USERNAME=guest
+      - RABBITMQ_SYNC_PASSWORD=guest
+    depends_on:
+      postgres-auth-db:
+        condition: service_healthy
+      rabbitmq-sync-broker:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+    networks:
+      - energy-network
+
+  device-service:
+    build:
+      context: ./backend/device-management
+      dockerfile: ./Dockerfile
+    container_name: device-service
+    restart: always
+    ports:
+      - "8082:8082"
+    environment:
+      - DB_IP=postgres-device-db
+      - DB_PORT=5432
+      - DB_DBNAME=device_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - USER_SERVICE_URL=http://user-service:8081
+      - RABBITMQ_SYNC_HOST=rabbitmq-sync-broker
+      - RABBITMQ_SYNC_PORT=5672
+      - RABBITMQ_SYNC_USERNAME=guest
+      - RABBITMQ_SYNC_PASSWORD=guest
+    depends_on:
+      postgres-device-db:
+        condition: service_healthy
+      rabbitmq-sync-broker:
+        condition: service_healthy
+      user-service:
+        condition: service_started  
+    networks:
+      - energy-network
+
+  monitoring-service:
+    build:
+      context: ./backend/monitoring-service
+      dockerfile: ./Dockerfile
+    container_name: monitoring-service
+    restart: always
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://monitoring-db:5432/monitoring_db
+      - SPRING_RABBITMQ_DATA_HOST=rabbitmq-data-broker
+      - SPRING_RABBITMQ_DATA_PORT=5672
+      - SPRING_RABBITMQ_SYNC_HOST=rabbitmq-sync-broker
+      - SPRING_RABBITMQ_SYNC_PORT=5672
+    depends_on:
+      monitoring-db:
+        condition: service_healthy
+      rabbitmq-data-broker:
+        condition: service_healthy
+      rabbitmq-sync-broker:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+    networks:
+      - energy-network
+
+  
+  customer-support-service:
+    build:
+      context: ./backend/customer-support-service
+      dockerfile: ./Dockerfile
+    container_name: customer-support-service
+    restart: always
+    ports:
+      - "8086:8086"
+    environment:
+      - GEMINI_API_KEY=AIzaSyDYKWqDEqECCaf-vJitjCyeOh1b8hJRRrI
+      - GEMINI_API_URL=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+    networks:
+      - energy-network
+
+
+  websocket-service:
+    build:
+      context: ./backend/websocket-service
+      dockerfile: ./Dockerfile
+    container_name: websocket-service
+    restart: always
+    ports:
+      - "8085:8085"
+    environment:
+      - SPRING_RABBITMQ_HOST=rabbitmq-sync-broker
+      - SPRING_RABBITMQ_PORT=5672
+      - SPRING_RABBITMQ_USERNAME=guest
+      - SPRING_RABBITMQ_PASSWORD=guest
+    depends_on:
+      rabbitmq-sync-broker:
+        condition: service_healthy
+    networks:
+      - energy-network
+
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+      dockerfile: ./Dockerfile
+    container_name: api-gateway
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - AUTH_SERVICE_URL=http://authorization-service:8083
+      - USER_SERVICE_URL=http://user-service:8081
+      - DEVICE_SERVICE_URL=http://device-service:8082
+      - MONITORING_SERVICE_URL=http://monitoring-service:8084
+      - SUPPORT_SERVICE_URL=http://customer-support-service:8086
+      - WEBSOCKET_SERVICE_URL=http://websocket-service:8085
+    depends_on:
+      - user-service
+      - device-service
+      - authorization-service
+      - monitoring-service
+      - customer-support-service
+      - websocket-service
+    networks:
+      - energy-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ./Dockerfile
+    container_name: frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080
+    depends_on:
+      - api-gateway
+    networks:
+      - energy-network
+
+volumes:
+  user-db-data:
+  device-db-data:
+  auth-db-data:
+  monitoring-db-data:
+  rabbitmq-data-broker:
+  rabbitmq-sync-broker:
+
+networks:
+  energy-network:
+    driver: bridge
