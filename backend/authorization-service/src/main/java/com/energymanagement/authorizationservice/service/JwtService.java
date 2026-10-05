@@ -6,6 +6,7 @@ import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import io.jsonwebtoken.JwtException;
 
 import java.security.Key;
 import java.util.Date;
@@ -47,6 +48,24 @@ public class JwtService
                 .setExpiration(expiryDate)
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)    //semneaza token-ul
                 .compact();
+    }
+
+
+    // Returns null if the token is invalid or expired
+    public String extractRole(String token)
+    {
+        try {
+            Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(getSigningKey())
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody();
+
+            return claims.get("role", String.class);
+
+        } catch (JwtException | IllegalArgumentException e) {
+            return null;
+        }
     }
 
 

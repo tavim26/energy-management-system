@@ -4,17 +4,15 @@ public class RegisterRequestDTO {
 
     private String username;
     private String password;
-    private String role;
     private String fullName;
     private String address;
 
     public RegisterRequestDTO() {
     }
 
-    public RegisterRequestDTO(String username, String password, String role, String fullName, String address) {
+    public RegisterRequestDTO(String username, String password, String fullName, String address) {
         this.username = username;
         this.password = password;
-        this.role = role;
         this.fullName = fullName;
         this.address = address;
     }
@@ -33,14 +31,6 @@ public class RegisterRequestDTO {
 
     public void setPassword(String password) {
         this.password = password;
-    }
-
-    public String getRole() {
-        return role;
-    }
-
-    public void setRole(String role) {
-        this.role = role;
     }
 
     public String getFullName() {

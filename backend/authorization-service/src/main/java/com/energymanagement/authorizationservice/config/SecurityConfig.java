@@ -23,6 +23,8 @@ public class SecurityConfig
                         .requestMatchers("/api/auth/register").permitAll()
                         .requestMatchers("/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/credentials/**").permitAll()
+                        // the ADMIN role is checked in AuthController
+                        .requestMatchers("/api/auth/users").permitAll()
 
                         .requestMatchers("/swagger-ui/**").permitAll()
                         .requestMatchers("/swagger-ui.html").permitAll()

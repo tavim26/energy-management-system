@@ -12,18 +12,20 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 public class AuthService
 {
+    public static final String ROLE_ADMIN = "ADMIN";
+    public static final String ROLE_CLIENT = "CLIENT";
+    private static final Set<String> VALID_ROLES = Set.of(ROLE_ADMIN, ROLE_CLIENT);
 
     private final CredentialRepository credentialRepository;
     private final UserServiceClient userServiceClient;
     private final JwtService jwtService;
-    private final BCryptPasswordEncoder passwordEncoder;
-
-    // RabbitTemplate pentru publicare evenimente de sincronizare
     private final RabbitTemplate syncRabbitTemplate;
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Value("${rabbitmq.exchange.sync:sync-exchange}")
     private String syncExchangeName;
@@ -38,165 +40,141 @@ public class AuthService
         this.jwtService = jwtService;
         this.userServiceClient = userServiceClient;
         this.syncRabbitTemplate = syncRabbitTemplate;
-        this.passwordEncoder = new BCryptPasswordEncoder();
     }
 
-    // Register
-    // 1. Apeleaza User Service sa creeze user-ul (REST - SINCRON)
-    // 2. Creeaza credential cu acelasi ID
-    // 3. Publica eveniment USER_CREATED pe Sync Exchange (ASINCRON)
-    public RegisterResponseDTO register(RegisterRequestDTO registerRequestDTO)
+    // Public self-registration always creates a CLIENT account
+    public RegisterResponseDTO register(RegisterRequestDTO request)
     {
-        // Validari
-        if (credentialRepository.existsByUsername(registerRequestDTO.getUsername()))
-        {
-            throw new RuntimeException("Username already exists: " + registerRequestDTO.getUsername());
-        }
-
-        if (registerRequestDTO.getUsername() == null || registerRequestDTO.getUsername().trim().isEmpty())
-        {
-            throw new RuntimeException("Username cannot be empty");
-        }
-
-        if (registerRequestDTO.getPassword() == null || registerRequestDTO.getPassword().trim().isEmpty())
-        {
-            throw new RuntimeException("Password cannot be empty");
-        }
-
-        String role = (registerRequestDTO.getRole() != null && !registerRequestDTO.getRole().trim().isEmpty())
-                ? registerRequestDTO.getRole()
-                : "CLIENT";
-
-        // 1. Apeleaza User Service pentru a crea user
-        Long userId = userServiceClient.createUserAndGetId(
-                registerRequestDTO.getFullName(),
-                registerRequestDTO.getAddress()
-        );
-
-        // 2. Hash parola
-        String hashedPassword = passwordEncoder.encode(registerRequestDTO.getPassword());
-
-        // 3. Creeaza credential cu acelasi ID
-        Credential credential = new Credential();
-        credential.setId(userId);
-        credential.setUsername(registerRequestDTO.getUsername());
-        credential.setPasswordHash(hashedPassword);
-        credential.setRole(role);
-
-        Credential savedCredential = credentialRepository.save(credential);
-
-        // 4. Publica eveniment USER_CREATED pe Sync Exchange (ASINCRON)
-        publishUserCreatedEvent(
-                userId,
-                registerRequestDTO.getUsername(),
-                registerRequestDTO.getPassword(),
-                role,
-                registerRequestDTO.getFullName(),
-                registerRequestDTO.getAddress()
-        );
-
-        return new RegisterResponseDTO(
-                savedCredential.getId(),
-                savedCredential.getUsername(),
-                savedCredential.getRole(),
-                registerRequestDTO.getFullName(),
-                registerRequestDTO.getAddress(),
-                "User registered successfully"
-        );
+        return createAccount(request, ROLE_CLIENT);
     }
 
-    // Login - autentificare user si returneaza JWT token
-    public LoginResponseDTO login(LoginRequestDTO loginRequestDTO)
+    // Account creation from the admin panel, where the role can be chosen
+    public RegisterResponseDTO createUserAsAdmin(AdminCreateUserDTO request)
     {
-        if (loginRequestDTO.getUsername() == null || loginRequestDTO.getUsername().trim().isEmpty())
+        String role = (request.getRole() == null || request.getRole().isBlank())
+                ? ROLE_CLIENT
+                : request.getRole().trim().toUpperCase();
+
+        if (!VALID_ROLES.contains(role))
         {
-            throw new RuntimeException("Username cannot be empty");
+            throw new IllegalArgumentException("Invalid role: " + request.getRole());
         }
 
-        if (loginRequestDTO.getPassword() == null || loginRequestDTO.getPassword().trim().isEmpty())
+        return createAccount(request, role);
+    }
+
+    public boolean adminExists()
+    {
+        return credentialRepository.existsByRole(ROLE_ADMIN);
+    }
+
+    public LoginResponseDTO login(LoginRequestDTO request)
+    {
+        if (isBlank(request.getUsername()) || isBlank(request.getPassword()))
         {
-            throw new RuntimeException("Password cannot be empty");
+            throw new IllegalArgumentException("Username and password are required");
         }
 
-        // Cauta credential dupa username
-        Optional<Credential> credentialOptional = credentialRepository.findByUsername(loginRequestDTO.getUsername());
+        Optional<Credential> credentialOptional = credentialRepository.findByUsername(request.getUsername());
 
-        if (!credentialOptional.isPresent())
+        if (credentialOptional.isEmpty()
+                || !passwordEncoder.matches(request.getPassword(), credentialOptional.get().getPasswordHash()))
         {
-            throw new RuntimeException("Invalid username or password");
+            throw new IllegalArgumentException("Invalid username or password");
         }
 
         Credential credential = credentialOptional.get();
 
-        // Verifica parola
-        boolean passwordMatches = passwordEncoder.matches(
-                loginRequestDTO.getPassword(),
-                credential.getPasswordHash()
-        );
-
-        if (!passwordMatches)
-        {
-            throw new RuntimeException("Invalid username or password");
-        }
-
-        // Genereaza JWT token
         String token = jwtService.generateToken(
                 credential.getId(),
                 credential.getUsername(),
                 credential.getRole()
         );
 
-        return new LoginResponseDTO(
-                token,
-                credential.getId(),
-                credential.getUsername(),
-                credential.getRole()
+        return new LoginResponseDTO(token, credential.getId(), credential.getUsername(), credential.getRole());
+    }
+
+    public Map<String, String> getUserCredentials(Long userId)
+    {
+        Optional<Credential> credentialOptional = credentialRepository.findById(userId);
+
+        if (credentialOptional.isEmpty())
+        {
+            return null;
+        }
+
+        Credential credential = credentialOptional.get();
+
+        Map<String, String> result = new HashMap<>();
+        result.put("username", credential.getUsername());
+        result.put("role", credential.getRole());
+
+        return result;
+    }
+
+    // 1. User Service creates the user profile (REST, synchronous) and returns its id
+    // 2. The hashed password is stored here, under the same id
+    // 3. USER_CREATED is published so the other services can sync (asynchronous)
+    private RegisterResponseDTO createAccount(RegisterRequestDTO request, String role)
+    {
+        if (isBlank(request.getUsername()))
+        {
+            throw new IllegalArgumentException("Username cannot be empty");
+        }
+
+        if (isBlank(request.getPassword()))
+        {
+            throw new IllegalArgumentException("Password cannot be empty");
+        }
+
+        if (credentialRepository.existsByUsername(request.getUsername()))
+        {
+            throw new IllegalArgumentException("Username already exists: " + request.getUsername());
+        }
+
+        Long userId = userServiceClient.createUserAndGetId(request.getFullName(), request.getAddress());
+
+        Credential credential = new Credential(
+                userId,
+                request.getUsername(),
+                passwordEncoder.encode(request.getPassword()),
+                role
+        );
+        credentialRepository.save(credential);
+
+        publishUserCreatedEvent(userId, request.getUsername(), role);
+
+        return new RegisterResponseDTO(
+                userId,
+                request.getUsername(),
+                role,
+                request.getFullName(),
+                request.getAddress(),
+                "User registered successfully"
         );
     }
 
-
-    // Publica eveniment USER_CREATED pe Sync Exchange
-    private void publishUserCreatedEvent(Long userId, String username, String password, String role, String fullName, String address)
+    // The password never leaves this service: other services only need to know the user exists
+    private void publishUserCreatedEvent(Long userId, String username, String role)
     {
         try {
             Map<String, Object> syncMessage = new HashMap<>();
             syncMessage.put("eventType", "USER_CREATED");
             syncMessage.put("userId", userId);
             syncMessage.put("username", username);
-            syncMessage.put("password", password);
             syncMessage.put("role", role);
-            syncMessage.put("fullName", fullName);
-            syncMessage.put("address", address);
 
-            // Publica pe Sync Exchange (fanout broadcast)
             syncRabbitTemplate.convertAndSend(syncExchangeName, "", syncMessage);
 
             System.out.println("Published USER_CREATED event for user ID: " + userId);
 
         } catch (Exception e) {
-
             System.err.println("Failed to publish USER_CREATED event: " + e.getMessage());
-            e.printStackTrace();
         }
     }
 
-
-    // Returneaza username si role pentru un user
-    public Map<String, String> getUserCredentials(Long userId)
+    private boolean isBlank(String value)
     {
-        Optional<Credential> credentialOptional = credentialRepository.findById(userId);
-
-        if (credentialOptional.isPresent())
-        {
-            Credential credential = credentialOptional.get();
-
-            Map<String, String> result = new HashMap<>();
-            result.put("username", credential.getUsername());
-            result.put("role", credential.getRole());
-
-            return result;
-        }
-
-        return null;
+        return value == null || value.trim().isEmpty();
     }
 }

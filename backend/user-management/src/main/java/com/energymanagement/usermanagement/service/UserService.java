@@ -1,7 +1,6 @@
 package com.energymanagement.usermanagement.service;
 
 import com.energymanagement.usermanagement.client.AuthServiceClient;
-import com.energymanagement.usermanagement.dto.CreateUserDTO;
 import com.energymanagement.usermanagement.dto.UpdateUserDTO;
 import com.energymanagement.usermanagement.dto.UserDTO;
 import com.energymanagement.usermanagement.model.User;
@@ -41,37 +40,6 @@ public class UserService
         this.userRepository = userRepository;
         this.authServiceClient = authServiceClient;
         this.syncRabbitTemplate = syncRabbitTemplate;
-    }
-
-    // Creare user nou
-    @Transactional
-    public UserDTO createUser(CreateUserDTO createUserDTO)
-    {
-        // Validari
-        if (createUserDTO.getUsername() == null || createUserDTO.getUsername().trim().isEmpty()) {
-            throw new RuntimeException("Username cannot be empty");
-        }
-
-        if (createUserDTO.getPassword() == null || createUserDTO.getPassword().trim().isEmpty()) {
-            throw new RuntimeException("Password cannot be empty");
-        }
-
-        // Creare user in user_db
-        User user = new User();
-        user.setFullName(createUserDTO.getFullName());
-        user.setAddress(createUserDTO.getAddress());
-
-        User savedUser = userRepository.save(user);
-
-        String role = (createUserDTO.getRole() != null && !createUserDTO.getRole().trim().isEmpty())
-                ? createUserDTO.getRole()
-                : "CLIENT";
-
-        // Publicare Sync Event USER_CREATED
-        publishUserCreatedEvent(savedUser, createUserDTO.getUsername(), createUserDTO.getPassword(), role);
-
-        // Return UserDTO complet
-        return convertToDTO(savedUser, createUserDTO.getUsername(), role);
     }
 
 

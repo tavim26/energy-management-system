@@ -5,6 +5,8 @@ import com.energymanagement.authorizationservice.service.AuthService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.energymanagement.authorizationservice.service.JwtService;
+import org.springframework.http.HttpHeaders;
 
 import java.util.Map;
 
@@ -14,10 +16,12 @@ public class AuthController
 {
 
     private final AuthService authService;
+    private final JwtService jwtService;
 
-    public AuthController(AuthService authService)
+    public AuthController(AuthService authService, JwtService jwtService)
     {
         this.authService = authService;
+        this.jwtService = jwtService;
     }
 
     // POST /api/auth/register
@@ -48,6 +52,37 @@ public class AuthController
         {
             return new ResponseEntity<>(null, HttpStatus.UNAUTHORIZED);
         }
+    }
+
+    // POST /api/auth/users - account creation from the admin panel
+    @PostMapping("/users")
+    public ResponseEntity<RegisterResponseDTO> createUser(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader,
+            @RequestBody AdminCreateUserDTO request)
+    {
+        if (!isAdmin(authHeader))
+        {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        try {
+            return new ResponseEntity<>(authService.createUserAsAdmin(request), HttpStatus.CREATED);
+
+        } catch (RuntimeException e) {
+            return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    // The gateway already checks the role; checking it here too keeps the endpoint
+    // safe when the service is called directly, without going through the gateway
+    private boolean isAdmin(String authHeader)
+    {
+        if (authHeader == null || !authHeader.startsWith("Bearer "))
+        {
+            return false;
+        }
+
+        return AuthService.ROLE_ADMIN.equals(jwtService.extractRole(authHeader.substring(7)));
     }
 
 

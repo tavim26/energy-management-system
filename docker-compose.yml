@@ -169,6 +169,8 @@ services:
       - RABBITMQ_SYNC_PORT=5672
       - RABBITMQ_SYNC_USERNAME=guest
       - RABBITMQ_SYNC_PASSWORD=guest
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     depends_on:
       postgres-auth-db:
         condition: service_healthy
@@ -244,7 +246,7 @@ services:
     ports:
       - "8086:8086"
     environment:
-      - GEMINI_API_KEY=AIzaSyDYKWqDEqECCaf-vJitjCyeOh1b8hJRRrI
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_API_URL=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
     networks:
       - energy-network

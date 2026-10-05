@@ -46,6 +46,12 @@ public class GatewayConfig
 
                 .route("auth-register", r -> r.path("/api/auth/register")
                         .uri(authServiceUrl))
+                // Account creation from the admin panel (ADMIN only)
+                .route("auth-admin-users", r -> r.path("/api/auth/users")
+                        .filters(f -> f
+                                .filter(authFilter)
+                                .filter(authorizationFilter))
+                        .uri(authServiceUrl))
 
                 // Customer Support - PUBLIC (oricine poate trimite mesaj)
                 .route("support", r -> r.path("/api/support/**")

@@ -22,6 +22,10 @@ public class AiSupportService
 
     public String generateResponse(String userMessage)
     {
+        if (apiKey == null || apiKey.isBlank())
+        {
+            return "AI Assistent is not configured.";
+        }
         // Construieste request body
         Map<String, Object> requestBody = new HashMap<>();
 
@@ -35,6 +39,8 @@ public class AiSupportService
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        // Sent as a header, not as a URL parameter, so the key never shows up in logged URLs
+        headers.set("x-goog-api-key", apiKey);
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
 

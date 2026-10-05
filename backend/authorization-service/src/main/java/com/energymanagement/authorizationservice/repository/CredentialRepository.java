@@ -16,5 +16,7 @@ public interface CredentialRepository extends JpaRepository<Credential, Long>
     // Verifica daca username-ul exista deja
     boolean existsByUsername(String username);
 
+    boolean existsByRole(String role);
+
 
 }

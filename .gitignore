@@ -1,0 +1,15 @@
+# Local secrets
+/.env
+
+# Build output
+target/
+node_modules/
+build/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store

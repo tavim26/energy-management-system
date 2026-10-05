@@ -1,6 +1,5 @@
 package com.energymanagement.usermanagement.controller;
 
-import com.energymanagement.usermanagement.dto.CreateUserDTO;
 import com.energymanagement.usermanagement.dto.UpdateUserDTO;
 import com.energymanagement.usermanagement.dto.UserDTO;
 import com.energymanagement.usermanagement.service.UserService;
@@ -26,17 +25,6 @@ public class UserController
     }
 
 
-    //creaza user nou
-    @PostMapping
-    public ResponseEntity<UserDTO> createUser(@RequestBody CreateUserDTO createUserDTO)
-    {
-        try {
-            UserDTO createdUser = userService.createUser(createUserDTO);
-            return new ResponseEntity<>(createdUser, HttpStatus.CREATED);
-        } catch (RuntimeException e) {
-            return new ResponseEntity<>(null, HttpStatus.BAD_REQUEST);
-        }
-    }
 
     //retureaza toti userii
     @GetMapping
