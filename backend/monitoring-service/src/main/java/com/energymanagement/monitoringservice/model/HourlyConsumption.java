@@ -1,19 +1,17 @@
 package com.energymanagement.monitoringservice.model;
 
 import jakarta.persistence.*;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+// Total energy consumed by one device during one hour (e.g. 14:00 - 15:00)
 @Entity
 @Table(
         name = "hourly_consumption",
-        uniqueConstraints = @UniqueConstraint(
-                name = "unique_device_hour",
-                columnNames = {"device_id", "hour_timestamp"}
-        )
+        uniqueConstraints = @UniqueConstraint(name = "unique_device_hour", columnNames = {"device_id", "hour_timestamp"})
 )
-public class HourlyConsumption
-{
+public class HourlyConsumption {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -22,83 +20,63 @@ public class HourlyConsumption
     @Column(name = "device_id", nullable = false)
     private Long deviceId;
 
+    // Start of the hour, e.g. 2026-10-05T14:00
     @Column(name = "hour_timestamp", nullable = false)
     private LocalDateTime hourTimestamp;
 
     @Column(name = "total_kwh", nullable = false, precision = 10, scale = 4)
-    private BigDecimal totalKwh;
+    private BigDecimal totalKwh = BigDecimal.ZERO;
 
-    @Column(name = "created_at")
-    private LocalDateTime createdAt;
+    // Ensures a single overconsumption alert per device per hour
+    @Column(name = "alert_sent", nullable = false, columnDefinition = "boolean default false")
+    private boolean alertSent;
 
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    public HourlyConsumption() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+    protected HourlyConsumption() {
     }
 
-    public HourlyConsumption(Long deviceId, LocalDateTime hourTimestamp, BigDecimal totalKwh) {
+    public HourlyConsumption(Long deviceId, LocalDateTime hourTimestamp) {
         this.deviceId = deviceId;
         this.hourTimestamp = hourTimestamp;
-        this.totalKwh = totalKwh;
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
     }
 
+    public void addKwh(BigDecimal kwh) {
+        this.totalKwh = this.totalKwh.add(kwh);
+    }
+
+    public void markAlertSent() {
+        this.alertSent = true;
+    }
+
+    @PrePersist
     @PreUpdate
-    public void preUpdate() {
+    void touch() {
         this.updatedAt = LocalDateTime.now();
     }
-
-    // Getters and setters
 
     public Long getId() {
         return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
     }
 
     public Long getDeviceId() {
         return deviceId;
     }
 
-    public void setDeviceId(Long deviceId) {
-        this.deviceId = deviceId;
-    }
-
     public LocalDateTime getHourTimestamp() {
         return hourTimestamp;
-    }
-
-    public void setHourTimestamp(LocalDateTime hourTimestamp) {
-        this.hourTimestamp = hourTimestamp;
     }
 
     public BigDecimal getTotalKwh() {
         return totalKwh;
     }
 
-    public void setTotalKwh(BigDecimal totalKwh) {
-        this.totalKwh = totalKwh;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
+    public boolean isAlertSent() {
+        return alertSent;
     }
 
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
     }
 }

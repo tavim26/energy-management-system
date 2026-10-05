@@ -8,22 +8,16 @@ import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
 @EnableWebSecurity
-public class SecurityConfig
-{
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception
-    {
-        http
-                // dezactivare CSRF (nu e necesar pentru acest tip de arhitectura stateless/websocket)
-                .csrf(csrf -> csrf.disable())
+public class SecurityConfig {
 
-                // reguli autorizare
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                // No cookies or sessions are used, so CSRF protection is not needed
+                .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        // permitere acces public pentru websocket handshake
                         .requestMatchers("/ws/**").permitAll()
-                        // permitere healthcheck
                         .requestMatchers("/api/websocket/health").permitAll()
-                        // restul necesita autnetificare
                         .anyRequest().authenticated()
                 );
 

@@ -1,151 +1,150 @@
 package com.energymanagement.monitoringservice.service;
 
+import com.energymanagement.monitoringservice.dto.DailyConsumptionDTO;
 import com.energymanagement.monitoringservice.dto.DeviceMessage;
+import com.energymanagement.monitoringservice.dto.HourlyConsumptionDTO;
+import com.energymanagement.monitoringservice.dto.MonitoredDeviceDTO;
+import com.energymanagement.monitoringservice.event.OverconsumptionPublisher;
+import com.energymanagement.monitoringservice.exception.ResourceNotFoundException;
 import com.energymanagement.monitoringservice.model.DeviceCopy;
 import com.energymanagement.monitoringservice.model.HourlyConsumption;
 import com.energymanagement.monitoringservice.repository.DeviceCopyRepository;
 import com.energymanagement.monitoringservice.repository.HourlyConsumptionRepository;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.beans.factory.annotation.Qualifier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.HashMap;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
-public class MonitoringService
-{
+public class MonitoringService {
 
-    private final HourlyConsumptionRepository repository;
+    private static final Logger log = LoggerFactory.getLogger(MonitoringService.class);
+
+    // A measurement is the average power over 10 minutes (1/6 h).
+    // Energy = power * time = (W / 1000) kW * (1/6) h = W / 6000 kWh
+    private static final BigDecimal WATTS_TO_KWH_PER_MEASUREMENT = BigDecimal.valueOf(6000);
+
+    private static final int MAX_LATEST_RECORDS = 100;
+
+    private final HourlyConsumptionRepository consumptionRepository;
     private final DeviceCopyRepository deviceCopyRepository;
-    private final RabbitTemplate syncRabbitTemplate;
+    private final OverconsumptionPublisher overconsumptionPublisher;
 
     public MonitoringService(
-            HourlyConsumptionRepository repository,
+            HourlyConsumptionRepository consumptionRepository,
             DeviceCopyRepository deviceCopyRepository,
-            @Qualifier("syncRabbitTemplate") RabbitTemplate syncRabbitTemplate
-    )
-    {
-        this.repository = repository;
+            OverconsumptionPublisher overconsumptionPublisher
+    ) {
+        this.consumptionRepository = consumptionRepository;
         this.deviceCopyRepository = deviceCopyRepository;
-        this.syncRabbitTemplate = syncRabbitTemplate;
+        this.overconsumptionPublisher = overconsumptionPublisher;
     }
 
+    // Adds a measurement to the hourly total of its device and checks the hourly limit
     @Transactional
-    public void processDeviceMessage(DeviceMessage message)
-    {
-        // Validare: verifica daca device-ul exista in device_copy
-        Optional<DeviceCopy> deviceCopyOpt = deviceCopyRepository.findById(message.getDeviceId());
-
-        if (!deviceCopyOpt.isPresent())
-        {
-            System.err.println("ERROR: Device ID " + message.getDeviceId()
-                    + " does not exist in device_copy table. Message ignored.");
+    public void processMeasurement(DeviceMessage message) {
+        if (message.deviceId() == null || message.timestamp() == null
+                || message.measurementValue() == null || message.measurementValue() < 0) {
+            log.warn("Invalid measurement ignored: {}", message);
             return;
         }
 
-        DeviceCopy deviceCopy = deviceCopyOpt.get();
+        DeviceCopy device = deviceCopyRepository.findById(message.deviceId()).orElse(null);
 
-        // Extrage ora
-        LocalDateTime hourTimestamp = message.getTimestamp()
-                .withMinute(0)
-                .withSecond(0)
-                .withNano(0);
-
-        // Converteste measurement value (Watts) la kWh
-        double kwhValue = message.getMeasurementValue() / 6000.0;
-
-        // cautare record existent pentru device + ora
-        Optional<HourlyConsumption> existingOpt = repository.findByDeviceIdAndHourTimestamp(
-                message.getDeviceId(),
-                hourTimestamp
-        );
-
-        BigDecimal newTotal;
-
-        if (existingOpt.isPresent())
-        {
-            // Update - adauga la total existent
-            HourlyConsumption existing = existingOpt.get();
-            BigDecimal currentTotal = existing.getTotalKwh();
-            newTotal = currentTotal.add(BigDecimal.valueOf(kwhValue));
-            existing.setTotalKwh(newTotal);
-            repository.save(existing);
-
-            System.out.println("Updated consumption for device " + message.getDeviceId()
-                    + " at " + hourTimestamp + ": " + newTotal + " kWh");
-        }
-        else
-        {
-            // Insert - creare record nou
-            newTotal = BigDecimal.valueOf(kwhValue);
-            HourlyConsumption newRecord = new HourlyConsumption(
-                    message.getDeviceId(),
-                    hourTimestamp,
-                    newTotal
-            );
-            repository.save(newRecord);
-
-            System.out.println("Created consumption for device " + message.getDeviceId()
-                    + " at " + hourTimestamp + ": " + kwhValue + " kWh");
+        if (device == null) {
+            log.warn("Measurement ignored: device {} is not known by the monitoring service", message.deviceId());
+            return;
         }
 
-        // verificare supraconsum
-        if (deviceCopy.getMaxConsumption() != null)
-        {
-            if (newTotal.compareTo(deviceCopy.getMaxConsumption()) > 0)
-            {
-                // supraconsum detectat
-                publishOverconsumptionNotification(
-                        message.getDeviceId(),
-                        newTotal.doubleValue(),
-                        deviceCopy.getMaxConsumption().doubleValue(),
-                        hourTimestamp
-                );
-            }
+        LocalDateTime hour = message.timestamp().truncatedTo(ChronoUnit.HOURS);
+
+        HourlyConsumption consumption = consumptionRepository
+                .findByDeviceIdAndHourTimestamp(device.getDeviceId(), hour)
+                .orElseGet(() -> new HourlyConsumption(device.getDeviceId(), hour));
+
+        BigDecimal kwh = BigDecimal.valueOf(message.measurementValue())
+                .divide(WATTS_TO_KWH_PER_MEASUREMENT, 4, RoundingMode.HALF_UP);
+
+        consumption.addKwh(kwh);
+
+        if (shouldSendAlert(device, consumption)) {
+            consumption.markAlertSent();
+            overconsumptionPublisher.publish(device, consumption);
         }
+
+        consumptionRepository.save(consumption);
+
+        log.debug("Device {} at {}: {} kWh", device.getDeviceId(), hour, consumption.getTotalKwh());
     }
 
-    private void publishOverconsumptionNotification(Long deviceId, Double consumption, Double limit, LocalDateTime timestamp) {
-        try {
-            // Gaseste userId din device_copy
-            Optional<DeviceCopy> deviceCopyOpt = deviceCopyRepository.findById(deviceId);
+    @Transactional(readOnly = true)
+    public DailyConsumptionDTO getDailyConsumption(Long deviceId, LocalDate date) {
+        ensureDeviceExists(deviceId);
 
-            if (!deviceCopyOpt.isPresent())
-            {
-                System.err.println("Device not found in device_copy: " + deviceId);
-                return;
-            }
+        Map<Integer, BigDecimal> kwhByHour = consumptionRepository
+                .findInInterval(deviceId, date.atStartOfDay(), date.plusDays(1).atStartOfDay())
+                .stream()
+                .collect(Collectors.toMap(
+                        record -> record.getHourTimestamp().getHour(),
+                        HourlyConsumption::getTotalKwh
+                ));
 
-            DeviceCopy deviceCopy = deviceCopyOpt.get();
-            Long userId = deviceCopy.getUserId();
+        List<DailyConsumptionDTO.HourValue> hours = new ArrayList<>();
+        BigDecimal total = BigDecimal.ZERO;
 
-            if (userId == null)
-            {
-                System.err.println("Device " + deviceId + " not assigned to any user. Notification skipped.");
-                return;
-            }
+        for (int hour = 0; hour < 24; hour++) {
+            BigDecimal kwh = kwhByHour.getOrDefault(hour, BigDecimal.ZERO);
+            hours.add(new DailyConsumptionDTO.HourValue(hour, kwh));
+            total = total.add(kwh);
+        }
 
-            Map<String, Object> notification = new HashMap<>();
-            notification.put("type", "OVERCONSUMPTION");
-            notification.put("deviceId", deviceId);
-            notification.put("userId", userId);
-            notification.put("consumption", consumption);
-            notification.put("limit", limit);
-            notification.put("timestamp", timestamp.toString());
+        return new DailyConsumptionDTO(deviceId, date, hours, total);
+    }
 
-            syncRabbitTemplate.convertAndSend("notifications-queue", notification);
+    @Transactional(readOnly = true)
+    public List<HourlyConsumptionDTO> getLatestConsumption(Long deviceId, int limit) {
+        if (limit < 1 || limit > MAX_LATEST_RECORDS) {
+            throw new IllegalArgumentException("Limit must be between 1 and " + MAX_LATEST_RECORDS);
+        }
 
-            System.out.println("OVERCONSUMPTION ALERT sent for device " + deviceId + " (user " + userId + ")");
+        ensureDeviceExists(deviceId);
 
-        } catch (Exception e) {
+        return consumptionRepository
+                .findByDeviceIdOrderByHourTimestampDesc(deviceId, PageRequest.of(0, limit))
+                .stream()
+                .map(record -> new HourlyConsumptionDTO(record.getHourTimestamp(), record.getTotalKwh()))
+                .toList();
+    }
 
-            System.err.println("Failed to publish overconsumption notification: " + e.getMessage());
-            e.printStackTrace();
+    @Transactional(readOnly = true)
+    public List<MonitoredDeviceDTO> getMonitoredDevices() {
+        return deviceCopyRepository.findAll().stream()
+                .map(MonitoredDeviceDTO::from)
+                .toList();
+    }
+
+    // Alerts go only to the owner, once per hour, when the hourly total goes over the device limit
+    private boolean shouldSendAlert(DeviceCopy device, HourlyConsumption consumption) {
+        return !consumption.isAlertSent()
+                && device.getUserId() != null
+                && device.getMaxConsumption() != null
+                && consumption.getTotalKwh().compareTo(device.getMaxConsumption()) > 0;
+    }
+
+    private void ensureDeviceExists(Long deviceId) {
+        if (!deviceCopyRepository.existsById(deviceId)) {
+            throw new ResourceNotFoundException("Device " + deviceId + " was not found");
         }
     }
 }

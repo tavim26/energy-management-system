@@ -1,6 +1,7 @@
 package com.energymanagement.monitoringservice.config;
 
 import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
@@ -13,159 +14,110 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 
+// The service talks to two brokers:
+// - data broker: receives measurements from the device simulator
+// - sync broker: receives device events and sends overconsumption alerts
 @Configuration
-public class RabbitMQConfig
-{
+public class RabbitMQConfig {
 
-    // Data Broker Configuration
-    @Value("${spring.rabbitmq.data.host}")
-    private String dataHost;
-
-    @Value("${spring.rabbitmq.data.port}")
-    private int dataPort;
-
-    @Value("${spring.rabbitmq.data.username}")
-    private String dataUsername;
-
-    @Value("${spring.rabbitmq.data.password}")
-    private String dataPassword;
-
-
-    // Sync Broker Configuration
-    @Value("${spring.rabbitmq.sync.host}")
-    private String syncHost;
-
-    @Value("${spring.rabbitmq.sync.port}")
-    private int syncPort;
-
-    @Value("${spring.rabbitmq.sync.username}")
-    private String syncUsername;
-
-    @Value("${spring.rabbitmq.sync.password}")
-    private String syncPassword;
-
-    // Queue names
-    @Value("${rabbitmq.queue.data}")
-    private String dataQueueName;
-
-    @Value("${rabbitmq.queue.sync}")
-    private String syncQueueName;
-
-    // DATA BROKER - Connection Factory
+    // Primary because Spring Boot's own RabbitMQ setup expects a single default connection
     @Bean
     @Primary
-    @Qualifier("dataConnectionFactory")
-    public ConnectionFactory dataConnectionFactory()
-    {
-        CachingConnectionFactory factory = new CachingConnectionFactory();
-        factory.setHost(dataHost);
-        factory.setPort(dataPort);
-        factory.setUsername(dataUsername);
-        factory.setPassword(dataPassword);
-        return factory;
+    public ConnectionFactory dataConnectionFactory(
+            @Value("${spring.rabbitmq.data.host}") String host,
+            @Value("${spring.rabbitmq.data.port}") int port,
+            @Value("${spring.rabbitmq.data.username}") String username,
+            @Value("${spring.rabbitmq.data.password}") String password
+    ) {
+        return connectionFactory(host, port, username, password);
     }
 
-
-    // SYNC BROKER - Connection Factory
     @Bean
-    @Qualifier("syncConnectionFactory")
-    public ConnectionFactory syncConnectionFactory()
-    {
-        CachingConnectionFactory factory = new CachingConnectionFactory();
-        factory.setHost(syncHost);
-        factory.setPort(syncPort);
-        factory.setUsername(syncUsername);
-        factory.setPassword(syncPassword);
-        return factory;
+    public ConnectionFactory syncConnectionFactory(
+            @Value("${spring.rabbitmq.sync.host}") String host,
+            @Value("${spring.rabbitmq.sync.port}") int port,
+            @Value("${spring.rabbitmq.sync.username}") String username,
+            @Value("${spring.rabbitmq.sync.password}") String password
+    ) {
+        return connectionFactory(host, port, username, password);
     }
 
-    // QUEUE DEFINITIONS
-
-    // Device Data Queue - pe Data Broker
     @Bean
-    public Queue deviceDataQueue()
-    {
-        return new Queue(dataQueueName, true);
-    }
-
-    // Notifications Queue - pe Sync Broker
-    @Bean
-    public Queue notificationsQueue()
-    {
-        return new Queue("notifications-queue", true);
-    }
-
-    // RABBIT ADMIN - Pentru Data Broker
-    @Bean
-    public RabbitAdmin dataRabbitAdmin(@Qualifier("dataConnectionFactory") ConnectionFactory dataConnectionFactory)
-    {
-        RabbitAdmin admin = new RabbitAdmin(dataConnectionFactory);
-        admin.declareQueue(deviceDataQueue());
-        return admin;
-    }
-
-    // RABBIT ADMIN - Pentru Sync Broker
-    @Bean
-    public RabbitAdmin syncRabbitAdmin(@Qualifier("syncConnectionFactory") ConnectionFactory syncConnectionFactory)
-    {
-        RabbitAdmin admin = new RabbitAdmin(syncConnectionFactory);
-        admin.declareQueue(notificationsQueue());
-        return admin;
-    }
-
-    // MESSAGE CONVERTER
-    @Bean
-    public MessageConverter jsonMessageConverter()
-    {
+    public MessageConverter jsonMessageConverter() {
         return new Jackson2JsonMessageConverter();
     }
 
-    // RABBIT TEMPLATES
+    // Each admin declares only the queues that belong to its own broker
     @Bean
-    @Primary
-    @Qualifier("dataRabbitTemplate")
-    public RabbitTemplate dataRabbitTemplate(@Qualifier("dataConnectionFactory") ConnectionFactory connectionFactory)
-    {
-        RabbitTemplate template = new RabbitTemplate(connectionFactory);
-        template.setMessageConverter(jsonMessageConverter());
-        return template;
+    public RabbitAdmin dataRabbitAdmin(@Qualifier("dataConnectionFactory") ConnectionFactory connectionFactory) {
+        return new RabbitAdmin(connectionFactory);
     }
 
-
     @Bean
-    @Qualifier("syncRabbitTemplate")
-    public RabbitTemplate syncRabbitTemplate(@Qualifier("syncConnectionFactory") ConnectionFactory connectionFactory)
-    {
-        RabbitTemplate template = new RabbitTemplate(connectionFactory);
-        template.setMessageConverter(jsonMessageConverter());
-        return template;
+    public RabbitAdmin syncRabbitAdmin(@Qualifier("syncConnectionFactory") ConnectionFactory connectionFactory) {
+        return new RabbitAdmin(connectionFactory);
     }
 
-
-
-
-    // LISTENER CONTAINER FACTORIES
-
     @Bean
-    public org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(
-            @Qualifier("dataConnectionFactory") ConnectionFactory connectionFactory
+    public Queue deviceDataQueue(
+            @Value("${rabbitmq.queue.data}") String name,
+            @Qualifier("dataRabbitAdmin") RabbitAdmin admin
     ) {
-        org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory factory =
-                new org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory();
-        factory.setConnectionFactory(connectionFactory);
-        factory.setMessageConverter(jsonMessageConverter());
-        factory.setMissingQueuesFatal(false);
+        Queue queue = new Queue(name, true);
+        queue.setAdminsThatShouldDeclare(admin);
+        return queue;
+    }
+
+    @Bean
+    public Queue notificationsQueue(
+            @Value("${rabbitmq.queue.notifications}") String name,
+            @Qualifier("syncRabbitAdmin") RabbitAdmin admin
+    ) {
+        Queue queue = new Queue(name, true);
+        queue.setAdminsThatShouldDeclare(admin);
+        return queue;
+    }
+
+    @Bean
+    public RabbitTemplate syncRabbitTemplate(
+            @Qualifier("syncConnectionFactory") ConnectionFactory connectionFactory,
+            MessageConverter jsonMessageConverter
+    ) {
+        RabbitTemplate template = new RabbitTemplate(connectionFactory);
+        template.setMessageConverter(jsonMessageConverter);
+        return template;
+    }
+
+    @Bean
+    public SimpleRabbitListenerContainerFactory dataRabbitListenerContainerFactory(
+            @Qualifier("dataConnectionFactory") ConnectionFactory connectionFactory,
+            MessageConverter jsonMessageConverter
+    ) {
+        return listenerFactory(connectionFactory, jsonMessageConverter);
+    }
+
+    @Bean
+    public SimpleRabbitListenerContainerFactory syncRabbitListenerContainerFactory(
+            @Qualifier("syncConnectionFactory") ConnectionFactory connectionFactory,
+            MessageConverter jsonMessageConverter
+    ) {
+        return listenerFactory(connectionFactory, jsonMessageConverter);
+    }
+
+    private ConnectionFactory connectionFactory(String host, int port, String username, String password) {
+        CachingConnectionFactory factory = new CachingConnectionFactory(host, port);
+        factory.setUsername(username);
+        factory.setPassword(password);
         return factory;
     }
 
-    @Bean
-    public org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory syncRabbitListenerContainerFactory(
-            @Qualifier("syncConnectionFactory") ConnectionFactory connectionFactory
+    private SimpleRabbitListenerContainerFactory listenerFactory(
+            ConnectionFactory connectionFactory,
+            MessageConverter messageConverter
     ) {
-        org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory factory =
-                new org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory();
+        SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         factory.setConnectionFactory(connectionFactory);
-        factory.setMessageConverter(jsonMessageConverter());
+        factory.setMessageConverter(messageConverter);
         factory.setMissingQueuesFatal(false);
         return factory;
     }

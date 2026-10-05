@@ -1,79 +1,61 @@
 package com.energymanagement.monitoringservice.service;
 
-import com.energymanagement.monitoringservice.model.DeviceCopy;
-import com.energymanagement.monitoringservice.repository.DeviceCopyRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.Map;
 
+import static com.energymanagement.monitoringservice.event.SyncEventType.*;
+
 @Component
-public class SyncEventConsumer
-{
+public class SyncEventConsumer {
 
-    private final DeviceCopyRepository deviceCopyRepository;
+    private static final Logger log = LoggerFactory.getLogger(SyncEventConsumer.class);
 
-    public SyncEventConsumer(DeviceCopyRepository deviceCopyRepository)
-    {
-        this.deviceCopyRepository = deviceCopyRepository;
+    private final DeviceSyncService deviceSyncService;
+
+    public SyncEventConsumer(DeviceSyncService deviceSyncService) {
+        this.deviceSyncService = deviceSyncService;
     }
 
-    @RabbitListener(
-            queues = "${rabbitmq.queue.sync}",
-            containerFactory = "syncRabbitListenerContainerFactory"
-    )
-    public void consumeSyncEvent(Map<String, Object> message)
-    {
+    @RabbitListener(queues = "${rabbitmq.queue.sync}", containerFactory = "syncRabbitListenerContainerFactory")
+    public void consumeSyncEvent(Map<String, Object> message) {
+        Object eventType = message.get("eventType");
+
         try {
-            String eventType = (String) message.get("eventType");
-            System.out.println("Received sync event in Monitoring Service: " + message);
-
-            if ("DEVICE_CREATED".equals(eventType))
-            {
-                Long deviceId = ((Number) message.get("deviceId")).longValue();
-
-                BigDecimal maxConsumption = null;
-                if (message.get("maxConsumption") != null)
-                {
-                    Number maxConsValue = (Number) message.get("maxConsumption");
-                    maxConsumption = BigDecimal.valueOf(maxConsValue.doubleValue());
-                }
-
-                // userId este NULL initial
-                DeviceCopy deviceCopy = new DeviceCopy(deviceId, maxConsumption, null);
-                deviceCopyRepository.save(deviceCopy);
-
-                System.out.println("Device ID " + deviceId + " saved in device_copy (userId=NULL)");
-            }
-            else if ("DEVICE_ASSIGNED".equals(eventType))
-            {
-                Long deviceId = ((Number) message.get("deviceId")).longValue();
-                Long userId = ((Number) message.get("userId")).longValue();
-
-                DeviceCopy deviceCopy = deviceCopyRepository.findById(deviceId).orElse(null);
-                if (deviceCopy != null)
-                {
-                    deviceCopy.setUserId(userId);
-                    deviceCopyRepository.save(deviceCopy);
-                    System.out.println("Device " + deviceId + " assigned to user " + userId);
-
-                }
-                else
-                {
-                    System.err.println("Device " + deviceId + " not found in device_copy");
+            switch (String.valueOf(eventType)) {
+                case DEVICE_CREATED, DEVICE_UPDATED -> deviceSyncService.saveDeviceData(
+                        readLong(message, "deviceId"),
+                        (String) message.get("deviceName"),
+                        readDecimal(message, "maxConsumption"));
+                case DEVICE_ASSIGNED -> deviceSyncService.setOwner(
+                        readLong(message, "deviceId"),
+                        readLong(message, "userId"));
+                case DEVICE_UNASSIGNED -> deviceSyncService.setOwner(readLong(message, "deviceId"), null);
+                case DEVICE_DELETED -> deviceSyncService.deleteDevice(readLong(message, "deviceId"));
+                // User events are also broadcast on this exchange, but are not needed here
+                default -> {
+                    return;
                 }
             }
-            else if ("DEVICE_DELETED".equals(eventType))
-            {
-                Long deviceId = ((Number) message.get("deviceId")).longValue();
-                deviceCopyRepository.deleteById(deviceId);
-                System.out.println("Device ID " + deviceId + " deleted from device_copy");
-            }
+
+            log.info("Processed {} for device {}", eventType, message.get("deviceId"));
 
         } catch (Exception e) {
-            System.err.println("Error processing sync event: " + e.getMessage());
-            e.printStackTrace();
+            // The message is dropped instead of being redelivered forever
+            log.error("Failed to process sync event {}", eventType, e);
         }
+    }
+
+    private Long readLong(Map<String, Object> message, String key) {
+        return ((Number) message.get(key)).longValue();
+    }
+
+    private BigDecimal readDecimal(Map<String, Object> message, String key) {
+        Object value = message.get(key);
+        return value == null ? null : new BigDecimal(value.toString());
     }
 }
