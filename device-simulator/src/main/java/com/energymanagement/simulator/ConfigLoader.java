@@ -5,18 +5,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
 
- // Incarca configuratia simulator-ului din fisier .properties
 public class ConfigLoader
  {
 
     private Properties properties;
 
-    // Constructor - incarca configuratia din fisier
     public ConfigLoader(String configFilePath) throws IOException
     {
         properties = new Properties();
 
-        // Incarca din file system (ex: /home/user/config.properties)
         try (FileInputStream fis = new FileInputStream(configFilePath))
         {
             properties.load(fis);
@@ -24,7 +21,6 @@ public class ConfigLoader
 
         } catch (IOException e)
         {
-            // Daca nu gaseste, incarca din classpath (src/main/resources)
             try (InputStream is = getClass().getClassLoader().getResourceAsStream(configFilePath))
             {
                 if (is != null)

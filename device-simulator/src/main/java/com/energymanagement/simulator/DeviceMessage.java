@@ -5,9 +5,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.LocalDateTime;
 
- // DTO pentru mesajul trimis catre RabbitMQ
- // Structura: {timestamp, deviceId, measurementValue}
-
 public class DeviceMessage
 {
 

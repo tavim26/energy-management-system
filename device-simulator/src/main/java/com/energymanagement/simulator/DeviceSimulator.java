@@ -8,9 +8,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 
-// Genereaza date realiste de consum energetic la intervale regulate
-// si le trimite catre RabbitMQ Data Collection Broker
-
 public class DeviceSimulator
 {
 
@@ -20,15 +17,12 @@ public class DeviceSimulator
     private double currentLoad;
 
 
-
-    // Constructor - initializeaza configuratia si producer-ul RabbitMQ
     public DeviceSimulator(String configFile) throws Exception
     {
         this.config = new ConfigLoader(configFile);
         this.random = new Random();
         this.currentLoad = config.getBaseLoad();
 
-        // Initializeaza conexiunea RabbitMQ
         this.producer = new RabbitMQProducer(
                 config.getRabbitMQHost(),
                 config.getRabbitMQPort(),
@@ -43,49 +37,40 @@ public class DeviceSimulator
         System.out.println("Interval: " + config.getIntervalMinutes() + " minutes");
     }
 
-    // Genereaza valoare de consum realista bazata pe ora din zi
-    // Primeste timestamp ca parametru pentru a functiona in modul fast-forward
+
     private double generateMeasurement(LocalDateTime timestamp)
     {
         int hour = timestamp.getHour();
 
-        // Factor bazat pe ora din zi
         double timeFactor = 1.0;
 
         if (hour >= 0 && hour < 6)
         {
-            // Noapte: consum redus
             timeFactor = 0.5 + random.nextDouble() * 0.2;  // 50-70%
 
         }
         else if (hour >= 6 && hour < 9)
         {
-            // Dimineata: consum mediu
             timeFactor = 0.7 + random.nextDouble() * 0.2;  // 70-90%
 
         }
         else if (hour >= 9 && hour < 17)
         {
-            // Zi: consum moderat
             timeFactor = 0.6 + random.nextDouble() * 0.2;  // 60-80%
 
         }
         else if (hour >= 17 && hour < 23)
         {
-            // Seara: consum maxim
             timeFactor = 0.8 + random.nextDouble() * 0.3;  // 80-110%
 
         }
         else
         {
-            // Seara tarziu: consum in scadere
             timeFactor = 0.6 + random.nextDouble() * 0.2;  // 60-80%
         }
 
-        // Adauga fluctuatie random mica de 5%
         double fluctuation = (random.nextDouble() - 0.5) * 0.1;
 
-        // Calculeaza consumul curent
         currentLoad = config.getBaseLoad() * timeFactor * (1 + fluctuation);
 
         return Math.max(0, currentLoad);
@@ -96,19 +81,15 @@ public class DeviceSimulator
 
     public void start(boolean fastForwardMode)
     {
-        // Creeaza un thread pool cu 1 thread pentru taskuri programate
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
-        // Timestamp de start - ora curenta
         final LocalDateTime[] simulatedTime = {LocalDateTime.now()};
 
-        // Interval bazat pe mod
         long interval;
         TimeUnit timeUnit;
 
         if (fastForwardMode)
         {
-            // Fast-forward: 5 secunde real = 10 minute simulat
             interval = 5;
             timeUnit = TimeUnit.SECONDS;
 
@@ -118,7 +99,6 @@ public class DeviceSimulator
         }
         else
         {
-            // Normal: interval din config (10 minute)
             interval = config.getIntervalMinutes();
             timeUnit = TimeUnit.MINUTES;
 
@@ -127,36 +107,29 @@ public class DeviceSimulator
             System.out.println("Sending measurements every " + interval + " MINUTES with real timestamps\n");
         }
 
-        // Programeaza task-ul sa ruleze periodic
         scheduler.scheduleAtFixedRate(() -> {
             try {
                 LocalDateTime timestamp;
 
                 if (fastForwardMode)
                 {
-                    // Mod Fast-Forward: foloseste timestamp simulat
                     timestamp = simulatedTime[0];
 
-                    // Avanseaza cu 10 minute pentru urmatoarea iteratie
                     simulatedTime[0] = simulatedTime[0].plusMinutes(10);
                 }
                 else
                 {
-                    // Mod Normal: foloseste timestamp real
                     timestamp = LocalDateTime.now();
                 }
 
-                // Genereaza valoare consum bazata pe ora din timestamp
                 double measurement = generateMeasurement(timestamp);
 
-                // Creeaza mesaj
                 DeviceMessage message = new DeviceMessage(
                         timestamp,
                         config.getDeviceId(),
                         measurement
                 );
 
-                // Trimite in RabbitMQ
                 producer.sendMessage(message);
 
             } catch (Exception e)
@@ -167,15 +140,12 @@ public class DeviceSimulator
         }, 0, interval, timeUnit);
 
 
-        // Adauga shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("\nShutting down simulator");
 
-            // Opreste scheduler-ul
             scheduler.shutdown();
 
             try {
-                // Inchide conexiunea RabbitMQ
                 producer.close();
             } catch (Exception e) {
                 e.printStackTrace();

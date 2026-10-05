@@ -1,16 +1,20 @@
-# imaginea de baza - foloseste openjdk 21
-# versiunea de Java folosita de container
-FROM amazoncorretto:21-alpine
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /build
 
-# irectorul de lucru din container la /app
+COPY pom.xml .
+COPY src ./src
+
+# Tests are skipped because the existing ones start the whole application
+# and need the databases and RabbitMQ to be running
+RUN --mount=type=cache,target=/root/.m2 mvn -B package -DskipTests
+
+# Runtime stage: only a JRE and the built jar
+FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
-# copiaza fisierul JAR din directorul target/ in container la calea /app/app.jar
-COPY target/*.jar app.jar
+RUN addgroup -S app && adduser -S app -G app
+COPY --from=build /build/target/*.jar app.jar
+USER app
 
-# documenteaza ca aplicatia asculta pe port 8082
 EXPOSE 8082
-
-# se executa cand container-ul porneste
-# porneste aplicatia Spring Boot din fisierul app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
