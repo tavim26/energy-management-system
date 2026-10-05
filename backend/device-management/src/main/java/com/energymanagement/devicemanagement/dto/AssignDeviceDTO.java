@@ -1,34 +1,13 @@
 package com.energymanagement.devicemanagement.dto;
 
- // DTO pentru asignarea unui device la un user
- // POST /api/devices/assign
-public class AssignDeviceDTO
- {
+import jakarta.validation.constraints.NotNull;
 
-    private Long userId;
-    private Long deviceId;
+public record AssignDeviceDTO(
 
-    public AssignDeviceDTO() {
-    }
+        @NotNull(message = "User id is required")
+        Long userId,
 
-    public AssignDeviceDTO(Long userId, Long deviceId) {
-        this.userId = userId;
-        this.deviceId = deviceId;
-    }
-
-    public Long getUserId() {
-        return userId;
-    }
-
-    public void setUserId(Long userId) {
-        this.userId = userId;
-    }
-
-    public Long getDeviceId() {
-        return deviceId;
-    }
-
-    public void setDeviceId(Long deviceId) {
-        this.deviceId = deviceId;
-    }
+        @NotNull(message = "Device id is required")
+        Long deviceId
+) {
 }

@@ -1,33 +1,17 @@
 package com.energymanagement.devicemanagement.dto;
 
-public class UpdateDeviceDTO
-{
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 
-    private String name;
-    private Double maxConsumption;
+import java.math.BigDecimal;
 
-    public UpdateDeviceDTO() {
-    }
+// Both fields are optional: only the ones sent are changed
+public record UpdateDeviceDTO(
 
-    public UpdateDeviceDTO(String name, Double maxConsumption) {
-        this.name = name;
-        this.maxConsumption = maxConsumption;
-    }
+        @Size(max = 150, message = "Device name must have at most 150 characters")
+        String name,
 
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public Double getMaxConsumption() {
-        return maxConsumption;
-    }
-
-    public void setMaxConsumption(Double maxConsumption) {
-        this.maxConsumption = maxConsumption;
-    }
+        @Positive(message = "Max consumption must be greater than 0")
+        BigDecimal maxConsumption
+) {
 }

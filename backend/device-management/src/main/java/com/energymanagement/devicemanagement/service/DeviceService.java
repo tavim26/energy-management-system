@@ -1,6 +1,12 @@
 package com.energymanagement.devicemanagement.service;
 
-import com.energymanagement.devicemanagement.dto.*;
+import com.energymanagement.devicemanagement.dto.AssignDeviceDTO;
+import com.energymanagement.devicemanagement.dto.CreateDeviceDTO;
+import com.energymanagement.devicemanagement.dto.DeviceDTO;
+import com.energymanagement.devicemanagement.dto.UpdateDeviceDTO;
+import com.energymanagement.devicemanagement.event.DeviceEventPublisher;
+import com.energymanagement.devicemanagement.exception.ConflictException;
+import com.energymanagement.devicemanagement.exception.ResourceNotFoundException;
 import com.energymanagement.devicemanagement.model.Device;
 import com.energymanagement.devicemanagement.model.UserCopy;
 import com.energymanagement.devicemanagement.repository.DeviceRepository;
@@ -8,252 +14,152 @@ import com.energymanagement.devicemanagement.repository.UserCopyRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import java.util.HashMap;
-import java.util.Map;
-
-import java.math.BigDecimal;
 import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
 
 @Service
-public class DeviceService
-{
+public class DeviceService {
 
     private final DeviceRepository deviceRepository;
     private final UserCopyRepository userCopyRepository;
-
-    // RabbitTemplate pentru publicare evenimente de sincronizare
-    private final RabbitTemplate syncRabbitTemplate;
-
-    // Numele exchange-ului de sincronizare
-    @Value("${rabbitmq.exchange.sync}")
-    private String syncExchangeName;
+    private final DeviceEventPublisher eventPublisher;
 
     public DeviceService(
             DeviceRepository deviceRepository,
             UserCopyRepository userCopyRepository,
-            @Qualifier("syncRabbitTemplate") RabbitTemplate syncRabbitTemplate
+            DeviceEventPublisher eventPublisher
     ) {
         this.deviceRepository = deviceRepository;
         this.userCopyRepository = userCopyRepository;
-        this.syncRabbitTemplate = syncRabbitTemplate;
+        this.eventPublisher = eventPublisher;
+    }
+
+    @Transactional(readOnly = true)
+    public List<DeviceDTO> getAllDevices() {
+        return deviceRepository.findAll().stream()
+                .map(DeviceDTO::from)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public DeviceDTO getDeviceById(Long id) {
+        return DeviceDTO.from(findDevice(id));
+    }
+
+    @Transactional(readOnly = true)
+    public List<DeviceDTO> getDevicesByUserId(Long userId) {
+        return deviceRepository.findByUserId(userId).stream()
+                .map(DeviceDTO::from)
+                .toList();
     }
 
     @Transactional
-    public DeviceDTO createDevice(CreateDeviceDTO createDeviceDTO)
-    {
-        if (deviceRepository.existsByName(createDeviceDTO.getName()))
-        {
-            throw new RuntimeException("Device name already exists: " + createDeviceDTO.getName());
-        }
+    public DeviceDTO createDevice(CreateDeviceDTO request) {
+        String name = request.name().trim();
+        ensureNameIsAvailable(name);
 
-        if (createDeviceDTO.getMaxConsumption() == null || createDeviceDTO.getMaxConsumption() <= 0)
-        {
-            throw new RuntimeException("Max consumption must be positive");
-        }
+        Device device = deviceRepository.save(new Device(name, request.maxConsumption()));
+        eventPublisher.deviceCreated(device);
 
-        // Creeaza device
-        Device device = new Device();
-        device.setName(createDeviceDTO.getName());
-        device.setMaxConsumption(BigDecimal.valueOf(createDeviceDTO.getMaxConsumption()));
-        device.setUserId(null);
-
-        Device savedDevice = deviceRepository.save(device);
-
-        // Publica eveniment DEVICE_CREATED pe Sync Exchange
-        publishDeviceCreatedEvent(savedDevice);
-
-        return convertToDTO(savedDevice);
+        return DeviceDTO.from(device);
     }
 
     @Transactional
-    public void deleteDevice(Long id)
-    {
-        if (!deviceRepository.existsById(id))
-        {
-            throw new RuntimeException("Device not found with id: " + id);
+    public DeviceDTO updateDevice(Long id, UpdateDeviceDTO request) {
+        Device device = findDevice(id);
+
+        if (request.name() != null) {
+            String name = request.name().trim();
+
+            if (name.isEmpty()) {
+                throw new IllegalArgumentException("Device name cannot be empty");
+            }
+
+            if (!name.equals(device.getName())) {
+                ensureNameIsAvailable(name);
+                device.setName(name);
+            }
         }
 
-        // Sterge device-ul
-        deviceRepository.deleteById(id);
-
-        // Publica eveniment DEVICE_DELETED pe Sync Exchange
-        publishDeviceDeletedEvent(id);
-    }
-
-
-
-    public List<DeviceDTO> getAllDevices()
-    {
-        List<Device> devices = deviceRepository.findAll();
-
-        return devices.stream()
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
-    }
-
-    public Optional<DeviceDTO> getDeviceById(Long id)
-    {
-        Optional<Device> deviceOptional = deviceRepository.findById(id);
-
-        return deviceOptional.map(this::convertToDTO);
-    }
-
-    public List<DeviceDTO> getDevicesByUserId(Long userId)
-    {
-        List<Device> devices = deviceRepository.findByUserId(userId);
-
-        return devices.stream()
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
-    }
-
-    public DeviceDTO updateDevice(Long id, UpdateDeviceDTO updateDeviceDTO)
-    {
-        Optional<Device> deviceOptional = deviceRepository.findById(id);
-
-        if (!deviceOptional.isPresent())
-        {
-            throw new RuntimeException("Device not found with id: " + id);
+        if (request.maxConsumption() != null) {
+            device.setMaxConsumption(request.maxConsumption());
         }
 
-        Device device = deviceOptional.get();
+        Device saved = deviceRepository.save(device);
+        eventPublisher.deviceUpdated(saved);
 
-        if (updateDeviceDTO.getName() != null)
-        {
-            device.setName(updateDeviceDTO.getName());
-        }
-
-        if (updateDeviceDTO.getMaxConsumption() != null)
-        {
-            device.setMaxConsumption(BigDecimal.valueOf(updateDeviceDTO.getMaxConsumption()));
-        }
-
-        Device updatedDevice = deviceRepository.save(device);
-
-        return convertToDTO(updatedDevice);
+        return DeviceDTO.from(saved);
     }
 
     @Transactional
-    public void assignDeviceToUser(AssignDeviceDTO assignDeviceDTO)
-    {
-        Optional<Device> deviceOptional = deviceRepository.findById(assignDeviceDTO.getDeviceId());
+    public void deleteDevice(Long id) {
+        Device device = findDevice(id);
 
-        if (!deviceOptional.isPresent())
-        {
-            throw new RuntimeException("Device not found with id: " + assignDeviceDTO.getDeviceId());
+        deviceRepository.delete(device);
+        eventPublisher.deviceDeleted(device.getId());
+    }
+
+    @Transactional
+    public void assignDevice(AssignDeviceDTO request) {
+        Device device = findDevice(request.deviceId());
+
+        if (!userCopyRepository.existsById(request.userId())) {
+            throw new ResourceNotFoundException(
+                    "User " + request.userId() + " was not found or cannot own devices");
         }
 
-        Device device = deviceOptional.get();
-
-        Optional<UserCopy> userCopyOptional = userCopyRepository.findById(assignDeviceDTO.getUserId());
-
-        if (!userCopyOptional.isPresent())
-        {
-            throw new RuntimeException("User not found in users_copy with id: " + assignDeviceDTO.getUserId());
+        if (device.getUserId() != null) {
+            throw new ConflictException(
+                    "Device '" + device.getName() + "' is already assigned to user " + device.getUserId());
         }
 
-        if (device.getUserId() != null)
-        {
-            throw new RuntimeException("Device is already assigned to user: " + device.getUserId());
-        }
-
-        device.setUserId(assignDeviceDTO.getUserId());
+        device.setUserId(request.userId());
         deviceRepository.save(device);
-
-        // Publica event DEVICE_ASSIGNED
-        publishDeviceAssignedEvent(device.getId(), assignDeviceDTO.getUserId());
+        eventPublisher.deviceAssigned(device.getId(), request.userId());
     }
 
     @Transactional
-    public void deleteAllDevicesForUser(Long userId)
-    {
+    public void unassignDevice(Long deviceId) {
+        Device device = findDevice(deviceId);
+
+        if (device.getUserId() == null) {
+            throw new ConflictException("Device '" + device.getName() + "' is not assigned to any user");
+        }
+
+        device.setUserId(null);
+        deviceRepository.save(device);
+        eventPublisher.deviceUnassigned(device.getId());
+    }
+
+    // Called when a USER_CREATED event arrives for a CLIENT account
+    @Transactional
+    public void registerUser(Long userId) {
+        if (!userCopyRepository.existsById(userId)) {
+            userCopyRepository.save(new UserCopy(userId));
+        }
+    }
+
+    // Called when a USER_DELETED event arrives: the user's devices become free again
+    @Transactional
+    public void removeUser(Long userId) {
         List<Device> devices = deviceRepository.findByUserId(userId);
 
-        for (Device device : devices)
-        {
+        for (Device device : devices) {
             device.setUserId(null);
+            eventPublisher.deviceUnassigned(device.getId());
         }
 
         deviceRepository.saveAll(devices);
+        userCopyRepository.deleteById(userId);
     }
 
+    private Device findDevice(Long id) {
+        return deviceRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Device " + id + " was not found"));
+    }
 
-
-    // Publica eveniment DEVICE_CREATED pe Sync Exchange
-    private void publishDeviceCreatedEvent(Device device)
-    {
-        try {
-            Map<String, Object> syncMessage = new HashMap<>();
-            syncMessage.put("eventType", "DEVICE_CREATED");
-            syncMessage.put("deviceId", device.getId());
-            syncMessage.put("deviceName", device.getName());
-            syncMessage.put("maxConsumption", device.getMaxConsumption());
-
-            // Publica pe Sync Exchange fanout broadcast)
-            syncRabbitTemplate.convertAndSend(syncExchangeName, "", syncMessage);
-
-            System.out.println("Published DEVICE_CREATED event for device ID: " + device.getId());
-
-        } catch (Exception e) {
-
-            System.err.println("Failed to publish DEVICE_CREATED event: " + e.getMessage());
-            e.printStackTrace();
+    private void ensureNameIsAvailable(String name) {
+        if (deviceRepository.existsByName(name)) {
+            throw new ConflictException("A device named '" + name + "' already exists");
         }
-    }
-
-
-
-    private void publishDeviceAssignedEvent(Long deviceId, Long userId)
-    {
-        try {
-            Map<String, Object> syncMessage = new HashMap<>();
-            syncMessage.put("eventType", "DEVICE_ASSIGNED");
-            syncMessage.put("deviceId", deviceId);
-            syncMessage.put("userId", userId);
-
-            syncRabbitTemplate.convertAndSend(syncExchangeName, "", syncMessage);
-
-            System.out.println("Published DEVICE_ASSIGNED event: device " + deviceId + " -> user " + userId);
-
-        } catch (Exception e) {
-            System.err.println("Failed to publish DEVICE_ASSIGNED event: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-
-    // Publica eveniment DEVICE_DELETED pe Sync Exchange
-    private void publishDeviceDeletedEvent(Long deviceId)
-    {
-        try {
-            Map<String, Object> syncMessage = new HashMap<>();
-            syncMessage.put("eventType", "DEVICE_DELETED");
-            syncMessage.put("deviceId", deviceId);
-
-            // Publica pe Sync Exchange (fanout broadcast)
-            syncRabbitTemplate.convertAndSend(syncExchangeName, "", syncMessage);
-
-            System.out.println("Published DEVICE_DELETED event for device ID: " + deviceId);
-
-        } catch (Exception e) {
-
-            System.err.println("Failed to publish DEVICE_DELETED event: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-
-    private DeviceDTO convertToDTO(Device device) {
-        return new DeviceDTO(
-                device.getId(),
-                device.getName(),
-                device.getMaxConsumption(),
-                device.getUserId()
-        );
     }
 }

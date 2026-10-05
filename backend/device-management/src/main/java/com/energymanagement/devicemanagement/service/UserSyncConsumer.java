@@ -1,73 +1,48 @@
 package com.energymanagement.devicemanagement.service;
 
-import com.energymanagement.devicemanagement.model.UserCopy;
-import com.energymanagement.devicemanagement.repository.UserCopyRepository;
+import com.energymanagement.devicemanagement.event.SyncEventType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
 @Component
-public class UserSyncConsumer
-{
+public class UserSyncConsumer {
 
-    private final UserCopyRepository userCopyRepository;
+    private static final Logger log = LoggerFactory.getLogger(UserSyncConsumer.class);
 
-    public UserSyncConsumer(UserCopyRepository userCopyRepository)
-    {
-        this.userCopyRepository = userCopyRepository;
+    private final DeviceService deviceService;
+
+    public UserSyncConsumer(DeviceService deviceService) {
+        this.deviceService = deviceService;
     }
 
-    @RabbitListener(
-            queues = "sync-queue-device",
-            containerFactory = "syncRabbitListenerContainerFactory"
-    )
-    public void consumeSyncEvent(Map<String, Object> message)
-    {
+    @RabbitListener(queues = "sync-queue-device", containerFactory = "syncRabbitListenerContainerFactory")
+    public void consumeSyncEvent(Map<String, Object> message) {
+        Object eventType = message.get("eventType");
+
         try {
-            String eventType = (String) message.get("eventType");
-
-            System.out.println("Received sync event in Device Service: " + message);
-
-            // Proceseaza event USER_CREATED
-            if ("USER_CREATED".equals(eventType))
-            {
-                Long userId = ((Number) message.get("userId")).longValue();
-
-                if (!userCopyRepository.existsById(userId))
-                {
-                    UserCopy userCopy = new UserCopy(userId);
-                    userCopyRepository.save(userCopy);
-                    System.out.println("Added user to users_copy: userId=" + userId);
-
+            if (SyncEventType.USER_CREATED.equals(eventType)) {
+                // Admin accounts are not tracked, so devices can only be assigned to clients
+                if ("CLIENT".equals(message.get("role"))) {
+                    Long userId = readUserId(message);
+                    deviceService.registerUser(userId);
+                    log.info("User {} added to users_copy", userId);
                 }
-                else
-                {
-                    System.out.println("User already exists in users_copy: userId=" + userId);
-                }
+            } else if (SyncEventType.USER_DELETED.equals(eventType)) {
+                Long userId = readUserId(message);
+                deviceService.removeUser(userId);
+                log.info("User {} removed and their devices unassigned", userId);
             }
-            else if ("USER_DELETED".equals(eventType))
-            {
-                Long userId = ((Number) message.get("userId")).longValue();
-
-                // Sterge user din users_copy
-                if (userCopyRepository.existsById(userId))
-                {
-                    userCopyRepository.deleteById(userId);
-                    System.out.println("Deleted user from users_copy: userId=" + userId);
-
-                }
-                else
-                {
-                    System.out.println("User not found in users_copy: userId=" + userId);
-                }
-            }
-
-
         } catch (Exception e) {
-
-            System.err.println("Error processing sync event: " + e.getMessage());
-            e.printStackTrace();
+            // The message is dropped instead of being redelivered forever
+            log.error("Failed to process sync event {}", eventType, e);
         }
+    }
+
+    private Long readUserId(Map<String, Object> message) {
+        return ((Number) message.get("userId")).longValue();
     }
 }
