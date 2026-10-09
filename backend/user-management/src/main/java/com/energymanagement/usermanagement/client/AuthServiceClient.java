@@ -1,45 +1,63 @@
 package com.energymanagement.usermanagement.client;
 
+import com.energymanagement.usermanagement.dto.CredentialDTO;
+import com.energymanagement.usermanagement.exception.ExternalServiceException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.http.*;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
-import java.util.Map;
+import java.time.Duration;
+import java.util.List;
+import java.util.Optional;
 
+// Reads usernames and roles from the internal endpoints of the Authorization Service
 @Component
-public class AuthServiceClient
-{
+public class AuthServiceClient {
 
-    @Value("${auth.service.url}")
-    private String authServiceUrl;
+    private final RestClient restClient;
 
-    private final RestTemplate restTemplate;
+    public AuthServiceClient(@Value("${auth.service.url}") String authServiceUrl) {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Duration.ofSeconds(3));
+        requestFactory.setReadTimeout(Duration.ofSeconds(5));
 
-    public AuthServiceClient()
-    {
-        this.restTemplate = new RestTemplate();
+        this.restClient = RestClient.builder()
+                .baseUrl(authServiceUrl)
+                .requestFactory(requestFactory)
+                .build();
     }
 
-    // Apeleaza Auth Service pentru a obtine username si role pentru un user
-    public Map<String, String> getUserCredentials(Long userId)
-    {
-        String url = authServiceUrl + "/api/auth/credentials/" + userId;
-
+    public List<CredentialDTO> getAllCredentials() {
         try {
-            ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
+            List<CredentialDTO> credentials = restClient.get()
+                    .uri("/internal/credentials")
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<List<CredentialDTO>>() {
+                    });
 
-            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null)
-            {
-                return (Map<String, String>) response.getBody();
-            }
+            return credentials == null ? List.of() : credentials;
 
-            return null;
+        } catch (RestClientException e) {
+            throw new ExternalServiceException("Authorization service is unavailable", e);
+        }
+    }
 
-        } catch (Exception e) {
+    public Optional<CredentialDTO> getCredentials(Long userId) {
+        try {
+            return Optional.ofNullable(restClient.get()
+                    .uri("/internal/credentials/{id}", userId)
+                    .retrieve()
+                    .body(CredentialDTO.class));
 
-            System.err.println("Error fetching credentials for user " + userId + ": " + e.getMessage());
-            return null;
+        } catch (HttpClientErrorException.NotFound e) {
+            return Optional.empty();
+
+        } catch (RestClientException e) {
+            throw new ExternalServiceException("Authorization service is unavailable", e);
         }
     }
 }

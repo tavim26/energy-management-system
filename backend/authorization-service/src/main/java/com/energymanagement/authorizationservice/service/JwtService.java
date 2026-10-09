@@ -1,62 +1,47 @@
 package com.energymanagement.authorizationservice.service;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import io.jsonwebtoken.JwtException;
 
+import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
 
 @Service
-public class JwtService
-{
+public class JwtService {
 
-    // secret key pentru token signature
-    @Value("${jwt.secret}")
-    private String secret;
+    private final Key signingKey;
+    private final long expirationMs;
 
-    // timp de expirare ptr token
-    @Value("${jwt.expiration}")
-    private Long expiration;
+    public JwtService(@Value("${jwt.secret}") String secret, @Value("${jwt.expiration}") long expirationMs) {
+        this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.expirationMs = expirationMs;
+    }
 
-    // genereaza un jwt pentru un utilizator
-    public String generateToken(Long userId, String username, String role)
-    {
-        // claims = informatiile care sunt in token
-        Map<String, Object> claims = new HashMap<>();
-
-        claims.put("userId", userId);
-        claims.put("username", username);
-        claims.put("role", role);
-
+    public String generateToken(Long userId, String username, String role) {
         Date now = new Date();
 
-        // data expirarii
-        Date expiryDate = new Date(now.getTime() + expiration);
-
-        // construire token si return
         return Jwts.builder()
-                .setClaims(claims)
                 .setSubject(username)
+                .claim("userId", userId)
+                .claim("username", username)
+                .claim("role", role)
                 .setIssuedAt(now)
-                .setExpiration(expiryDate)
-                .signWith(getSigningKey(), SignatureAlgorithm.HS256)    //semneaza token-ul
+                .setExpiration(new Date(now.getTime() + expirationMs))
+                .signWith(signingKey, SignatureAlgorithm.HS256)
                 .compact();
     }
 
-
     // Returns null if the token is invalid or expired
-    public String extractRole(String token)
-    {
+    public String extractRole(String token) {
         try {
             Claims claims = Jwts.parserBuilder()
-                    .setSigningKey(getSigningKey())
+                    .setSigningKey(signingKey)
                     .build()
                     .parseClaimsJws(token)
                     .getBody();
@@ -66,13 +51,5 @@ public class JwtService
         } catch (JwtException | IllegalArgumentException e) {
             return null;
         }
-    }
-
-
-
-
-    private Key getSigningKey()
-    {
-        return Keys.hmacShaKeyFor(secret.getBytes());
     }
 }

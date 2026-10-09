@@ -1,32 +1,13 @@
 package com.energymanagement.authorizationservice.dto;
 
-public class LoginRequestDTO {
+import jakarta.validation.constraints.NotBlank;
 
-    private String username;
-    private String password;
+public record LoginRequestDTO(
 
-    public LoginRequestDTO() {
-    }
+        @NotBlank(message = "Username is required")
+        String username,
 
-    public LoginRequestDTO(String username, String password) {
-        this.username = username;
-        this.password = password;
-    }
-
-
-    public String getUsername() {
-        return username;
-    }
-
-    public void setUsername(String username) {
-        this.username = username;
-    }
-
-    public String getPassword() {
-        return password;
-    }
-
-    public void setPassword(String password) {
-        this.password = password;
-    }
+        @NotBlank(message = "Password is required")
+        String password
+) {
 }

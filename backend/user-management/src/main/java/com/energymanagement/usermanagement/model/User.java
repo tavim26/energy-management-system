@@ -2,6 +2,7 @@ package com.energymanagement.usermanagement.model;
 
 import jakarta.persistence.*;
 
+// Profile data of a user. Username, password and role are stored by the Authorization Service.
 @Entity
 @Table(name = "users")
 public class User {
@@ -16,21 +17,16 @@ public class User {
     @Column(length = 300)
     private String address;
 
-    public User() {
+    protected User() {
     }
 
-    public User(Long id, String fullName, String address) {
-        this.id = id;
+    public User(String fullName, String address) {
         this.fullName = fullName;
         this.address = address;
     }
 
     public Long getId() {
         return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
     }
 
     public String getFullName() {

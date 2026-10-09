@@ -1,79 +1,52 @@
 package com.energymanagement.authorizationservice.config;
 
+import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 
-/**
- * Configuratie RabbitMQ pentru Sync Broker - Authorization Service
- *
- * Auth Service NU declara infrastructura (declarata de User Service).
- * Auth Service doar:
- * - Se conecteaza la Sync Broker
- * - Publica evenimente USER_CREATED
- * - Consuma evenimente USER_CREATED/USER_DELETED de pe sync-queue-auth
- */
+// Connection to the sync broker. The exchange and queues are declared by the User Service.
 @Configuration
 public class RabbitMQSyncConfig {
 
-    @Value("${spring.rabbitmq.sync.host}")
-    private String syncHost;
-
-    @Value("${spring.rabbitmq.sync.port}")
-    private int syncPort;
-
-    @Value("${spring.rabbitmq.sync.username}")
-    private String syncUsername;
-
-    @Value("${spring.rabbitmq.sync.password}")
-    private String syncPassword;
-
-    // CONNECTION FACTORY - conectare la Sync Broker
     @Bean
-    @Primary
-    @Qualifier("syncConnectionFactory")
-    public ConnectionFactory syncConnectionFactory() {
-        CachingConnectionFactory factory = new CachingConnectionFactory();
-        factory.setHost(syncHost);
-        factory.setPort(syncPort);
-        factory.setUsername(syncUsername);
-        factory.setPassword(syncPassword);
+    public ConnectionFactory syncConnectionFactory(
+            @Value("${spring.rabbitmq.sync.host}") String host,
+            @Value("${spring.rabbitmq.sync.port}") int port,
+            @Value("${spring.rabbitmq.sync.username}") String username,
+            @Value("${spring.rabbitmq.sync.password}") String password
+    ) {
+        CachingConnectionFactory factory = new CachingConnectionFactory(host, port);
+        factory.setUsername(username);
+        factory.setPassword(password);
         return factory;
     }
 
-    // MESSAGE CONVERTER
     @Bean
     public MessageConverter jsonMessageConverter() {
         return new Jackson2JsonMessageConverter();
     }
 
-    // RABBIT TEMPLATE - pentru publicare evenimente
     @Bean
-    @Primary
-    @Qualifier("syncRabbitTemplate")
-    public RabbitTemplate syncRabbitTemplate(
-            @Qualifier("syncConnectionFactory") ConnectionFactory connectionFactory) {
-        RabbitTemplate template = new RabbitTemplate(connectionFactory);
-        template.setMessageConverter(jsonMessageConverter());
+    public RabbitTemplate syncRabbitTemplate(ConnectionFactory syncConnectionFactory, MessageConverter jsonMessageConverter) {
+        RabbitTemplate template = new RabbitTemplate(syncConnectionFactory);
+        template.setMessageConverter(jsonMessageConverter);
         return template;
     }
 
-    // LISTENER CONTAINER FACTORY - pentru consumare evenimente
     @Bean
-    public org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory syncRabbitListenerContainerFactory(
-            @Qualifier("syncConnectionFactory") ConnectionFactory connectionFactory
+    public SimpleRabbitListenerContainerFactory syncRabbitListenerContainerFactory(
+            ConnectionFactory syncConnectionFactory,
+            MessageConverter jsonMessageConverter
     ) {
-        org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory factory =
-                new org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory();
-        factory.setConnectionFactory(connectionFactory);
-        factory.setMessageConverter(jsonMessageConverter());
+        SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
+        factory.setConnectionFactory(syncConnectionFactory);
+        factory.setMessageConverter(jsonMessageConverter);
         factory.setMissingQueuesFatal(false);
         return factory;
     }

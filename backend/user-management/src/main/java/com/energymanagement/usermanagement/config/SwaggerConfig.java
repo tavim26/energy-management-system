@@ -1,41 +1,32 @@
 package com.energymanagement.usermanagement.config;
 
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
-import io.swagger.v3.oas.models.info.Contact;
-import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
-import io.swagger.v3.oas.models.Components;
+import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-// http://localhost:8081/swagger-ui.html
-
+// Available at /swagger-ui.html
 @Configuration
 public class SwaggerConfig {
 
-    @Bean
-    public OpenAPI userServiceAPI()
-    {
-        // schema de securitate JWT
-        String securitySchemeName = "Bearer Authentication";
+    private static final String SECURITY_SCHEME = "Bearer Authentication";
 
+    @Bean
+    public OpenAPI userServiceAPI() {
         return new OpenAPI()
                 .info(new Info()
                         .title("User Service API")
-                        .description("API pentru managementul utilizatorilor")
-                        .version("1.0")
-                        .contact(new Contact()
-                                .name("Energy Management Team")
-                                .email("support@energymanagement.com")))
-                // add suport pt JWT token
-                .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
+                        .description("User profile management")
+                        .version("1.0"))
+                .addSecurityItem(new SecurityRequirement().addList(SECURITY_SCHEME))
                 .components(new Components()
-                        .addSecuritySchemes(securitySchemeName,
-                                new SecurityScheme()
-                                        .name(securitySchemeName)
-                                        .type(SecurityScheme.Type.HTTP)
-                                        .scheme("bearer")
-                                        .bearerFormat("JWT")));
+                        .addSecuritySchemes(SECURITY_SCHEME, new SecurityScheme()
+                                .name(SECURITY_SCHEME)
+                                .type(SecurityScheme.Type.HTTP)
+                                .scheme("bearer")
+                                .bearerFormat("JWT")));
     }
 }

@@ -1,51 +1,22 @@
 package com.energymanagement.authorizationservice.dto;
 
-public class RegisterRequestDTO {
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
-    private String username;
-    private String password;
-    private String fullName;
-    private String address;
+public record RegisterRequestDTO(
 
-    public RegisterRequestDTO() {
-    }
+        @NotBlank(message = "Username is required")
+        @Size(min = 3, max = 100, message = "Username must have between 3 and 100 characters")
+        String username,
 
-    public RegisterRequestDTO(String username, String password, String fullName, String address) {
-        this.username = username;
-        this.password = password;
-        this.fullName = fullName;
-        this.address = address;
-    }
+        @NotBlank(message = "Password is required")
+        @Size(min = 6, max = 100, message = "Password must have between 6 and 100 characters")
+        String password,
 
-    public String getUsername() {
-        return username;
-    }
+        @Size(max = 200, message = "Full name must have at most 200 characters")
+        String fullName,
 
-    public void setUsername(String username) {
-        this.username = username;
-    }
-
-    public String getPassword() {
-        return password;
-    }
-
-    public void setPassword(String password) {
-        this.password = password;
-    }
-
-    public String getFullName() {
-        return fullName;
-    }
-
-    public void setFullName(String fullName) {
-        this.fullName = fullName;
-    }
-
-    public String getAddress() {
-        return address;
-    }
-
-    public void setAddress(String address) {
-        this.address = address;
-    }
+        @Size(max = 300, message = "Address must have at most 300 characters")
+        String address
+) {
 }
