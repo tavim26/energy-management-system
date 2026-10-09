@@ -1,77 +1,59 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.energymanagement</groupId>
     <artifactId>device-simulator</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <name>device-simulator</name>
+    <description>Standalone smart meter simulator that sends energy measurements to RabbitMQ</description>
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <jackson.version>2.15.2</jackson.version>
     </properties>
 
-    <!-- ========================================== -->
-    <!-- DEPENDENCIES                               -->
-    <!-- ========================================== -->
     <dependencies>
-
-        <!-- RabbitMQ Java Client -->
-        <!-- Folosit pentru conectare la RabbitMQ si trimitere mesaje -->
         <dependency>
             <groupId>com.rabbitmq</groupId>
             <artifactId>amqp-client</artifactId>
             <version>5.18.0</version>
         </dependency>
 
-        <!-- Jackson Databind -->
-        <!-- Folosit pentru serializare/deserializare JSON -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>2.15.2</version>
+            <version>${jackson.version}</version>
         </dependency>
-
-        <!-- Jackson JSR310 Module -->
-        <!-- Necesar pentru serializare LocalDateTime in JSON -->
+        <!-- Adds JSON support for java.time types such as LocalDateTime -->
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
-            <version>2.15.2</version>
+            <version>${jackson.version}</version>
         </dependency>
 
+        <!-- Logging backend for the RabbitMQ client -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
             <version>1.7.36</version>
         </dependency>
-
     </dependencies>
 
-    <!-- ========================================== -->
-    <!-- BUILD CONFIGURATION                        -->
-    <!-- ========================================== -->
     <build>
+        <finalName>device-simulator</finalName>
         <plugins>
-
-            <!-- Maven Compiler Plugin -->
-            <!-- Compileaza codul Java cu versiunea 21 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
-                <configuration>
-                    <source>21</source>
-                    <target>21</target>
-                </configuration>
             </plugin>
 
-            <!-- Maven Shade Plugin -->
-            <!-- Creeaza un JAR executable ("fat JAR" / "uber JAR") -->
-            <!-- care contine toate dependencies incluse -->
+            <!-- Packages the simulator and its dependencies into a single runnable jar -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -84,14 +66,11 @@
                         </goals>
                         <configuration>
                             <transformers>
-                                <!-- Seteaza clasa Main in MANIFEST.MF -->
-                                <!-- Permite rularea cu: java -jar device-simulator.jar -->
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.energymanagement.simulator.DeviceSimulator</mainClass>
                                 </transformer>
                             </transformers>
-
-                            <!-- Exclude fisiere de semnatura care pot cauza conflicte -->
+                            <!-- Signature files copied from signed dependencies would make the merged jar invalid -->
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
@@ -106,8 +85,6 @@
                     </execution>
                 </executions>
             </plugin>
-
         </plugins>
     </build>
-
 </project>
