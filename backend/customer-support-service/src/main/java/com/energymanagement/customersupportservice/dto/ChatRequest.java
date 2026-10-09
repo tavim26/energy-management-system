@@ -1,39 +1,12 @@
 package com.energymanagement.customersupportservice.dto;
 
-public class ChatRequest {
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
-    private Long userId;
-    private String message;
+public record ChatRequest(
 
-    public ChatRequest() {
-    }
-
-    public ChatRequest(Long userId, String message) {
-        this.userId = userId;
-        this.message = message;
-    }
-
-    public Long getUserId() {
-        return userId;
-    }
-
-    public void setUserId(Long userId) {
-        this.userId = userId;
-    }
-
-    public String getMessage() {
-        return message;
-    }
-
-    public void setMessage(String message) {
-        this.message = message;
-    }
-
-    @Override
-    public String toString() {
-        return "ChatRequest{" +
-                "userId=" + userId +
-                ", message='" + message + '\'' +
-                '}';
-    }
+        @NotBlank(message = "Message cannot be empty")
+        @Size(max = 1000, message = "Message must have at most 1000 characters")
+        String message
+) {
 }

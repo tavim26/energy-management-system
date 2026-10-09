@@ -1,5 +1,6 @@
 package com.energymanagement.apigateway.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
@@ -8,28 +9,19 @@ import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
+// Allows the frontend, served from another origin (port 3000), to call the gateway from the browser
 @Configuration
-public class CorsConfig
-{
+public class CorsConfig {
 
     @Bean
-    public CorsWebFilter corsWebFilter()
-    {
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-
+    public CorsWebFilter corsWebFilter(@Value("${cors.allowed-origins}") List<String> allowedOrigins) {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:3000"));
+        config.setAllowedOrigins(allowedOrigins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
-        config.setExposedHeaders(List.of(
-                "Authorization",
-                "Upgrade",
-                "Connection",
-                "Sec-WebSocket-Accept"
-        ));
 
-
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
 
         return new CorsWebFilter(source);

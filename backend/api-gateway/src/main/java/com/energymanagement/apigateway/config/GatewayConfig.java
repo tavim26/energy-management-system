@@ -1,91 +1,57 @@
 package com.energymanagement.apigateway.config;
 
-import com.energymanagement.apigateway.filter.AuthenticationFilter;
-import com.energymanagement.apigateway.filter.AuthorizationFilter;
+import com.energymanagement.apigateway.filter.JwtAuthorizationFilter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+// Single entry point for the frontend: every request is forwarded to the matching microservice.
+// Routes without the JWT filter are public. /internal/** is intentionally not routed.
 @Configuration
-public class GatewayConfig
-{
-
-    private final AuthenticationFilter authFilter;
-    private final AuthorizationFilter authorizationFilter;
-
-    @Value("${service.auth.url}")
-    private String authServiceUrl;
-
-    @Value("${service.user.url}")
-    private String userServiceUrl;
-
-    @Value("${service.device.url}")
-    private String deviceServiceUrl;
-
-    @Value("${service.support.url}")
-    private String supportServiceUrl;
-
-    @Value("${service.websocket.url}")
-    private String websocketServiceUrl;
-
-    public GatewayConfig(AuthenticationFilter authFilter, AuthorizationFilter authorizationFilter)
-    {
-        this.authFilter = authFilter;
-        this.authorizationFilter = authorizationFilter;
-    }
+public class GatewayConfig {
 
     @Bean
-    public RouteLocator routes(RouteLocatorBuilder builder)
-    {
+    public RouteLocator routes(
+            RouteLocatorBuilder builder,
+            JwtAuthorizationFilter jwtFilter,
+            @Value("${service.auth.url}") String authServiceUrl,
+            @Value("${service.user.url}") String userServiceUrl,
+            @Value("${service.device.url}") String deviceServiceUrl,
+            @Value("${service.support.url}") String supportServiceUrl,
+            @Value("${service.websocket.url}") String websocketServiceUrl
+    ) {
         return builder.routes()
-                // Rute publice (fara autentificare - register si login)
-                .route("auth-login", r -> r.path("/api/auth/login")
+                .route("auth-public", r -> r.path("/api/auth/login", "/api/auth/register")
                         .uri(authServiceUrl))
 
-                .route("auth-register", r -> r.path("/api/auth/register")
-                        .uri(authServiceUrl))
-                // Account creation from the admin panel (ADMIN only)
-                .route("auth-admin-users", r -> r.path("/api/auth/users")
-                        .filters(f -> f
-                                .filter(authFilter)
-                                .filter(authorizationFilter))
+                .route("auth-admin", r -> r.path("/api/auth/users")
+                        .filters(f -> f.filter(jwtFilter))
                         .uri(authServiceUrl))
 
-                // Customer Support - PUBLIC (oricine poate trimite mesaj)
+                .route("users", r -> r.path("/api/users/**")
+                        .filters(f -> f.filter(jwtFilter))
+                        .uri(userServiceUrl))
+
+                .route("devices", r -> r.path("/api/devices/**")
+                        .filters(f -> f.filter(jwtFilter))
+                        .uri(deviceServiceUrl))
+
                 .route("support", r -> r.path("/api/support/**")
                         .uri(supportServiceUrl))
 
-                // WebSocket endpoint - PUBLIC (pentru conexiuni WS)
-                .route("websocket-connection", r -> r.path("/ws/**")
+                // SockJS handshake and WebSocket connection. The WebSocket Service adds its own
+                // CORS headers, so the duplicates added by the gateway are removed.
+                .route("websocket", r -> r.path("/ws/**")
                         .filters(f -> f
                                 .dedupeResponseHeader("Access-Control-Allow-Origin", "RETAIN_UNIQUE")
                                 .dedupeResponseHeader("Access-Control-Allow-Credentials", "RETAIN_UNIQUE"))
                         .uri(websocketServiceUrl))
 
-
-
-
-                // Rute protejate (autentificare + autorizare)
-
                 .route("websocket-api", r -> r.path("/api/websocket/**")
-                        .filters(f -> f
-                                .filter(authFilter)
-                                .filter(authorizationFilter))
+                        .filters(f -> f.filter(jwtFilter))
                         .uri(websocketServiceUrl))
-
-                .route("users", r -> r.path("/api/users/**")
-                        .filters(f -> f
-                                .filter(authFilter)
-                                .filter(authorizationFilter))
-                        .uri(userServiceUrl))
-
-                .route("devices", r -> r.path("/api/devices/**")
-                        .filters(f -> f
-                                .filter(authFilter)
-                                .filter(authorizationFilter))
-                        .uri(deviceServiceUrl))
 
                 .build();
     }
