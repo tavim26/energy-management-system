@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* Design tokens: every color and font used by the interface is defined here */
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif, sans-serif;
+
+  --color-paper: #f3f5f4;
+  --color-surface: #ffffff;
+  --color-ink: #1b2a26;
+  --color-muted: #5b6964;
+  --color-line: #dae1de;
+
+  --color-brand: #1f6f5c;
+  --color-brand-strong: #17584a;
+  --color-brand-soft: #e2efeb;
+
+  --color-energy: #e9a300;
+  --color-energy-soft: #fdf3d8;
+
+  --color-danger: #c2412d;
+  --color-danger-soft: #fae8e4;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+
+  /* Numbers line up in tables and figures */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
