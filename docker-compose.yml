@@ -295,7 +295,7 @@ services:
     networks:
       - energy-network
 
-   frontend:
+  frontend:
     build:
       context: ./frontend
       args:
